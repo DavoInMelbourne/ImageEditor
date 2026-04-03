@@ -1,0 +1,9 @@
+node_modules/
+dist/
+uploads/
+public/bundle.js
+public/bundle.js.map
+*.tgz
+
+.claude
+AI_CONTEXT.md

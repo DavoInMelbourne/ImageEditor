@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SVG Image Editor</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>🎨 SVG Image Editor</h1>
+    <p class="subtitle">Convert, recolor, split & edit your images</p>
+  </header>
+
+  <main>
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="tool-group">
+        <button id="btn-import-png" class="tool-btn" title="Import PNG">
+          <span class="icon">📷</span> Import PNG
+        </button>
+        <button id="btn-import-svg" class="tool-btn" title="Import SVG">
+          <span class="icon">📄</span> Import SVG
+        </button>
+        <button id="btn-export-svg" class="tool-btn" title="Export SVG" disabled>
+          <span class="icon">💾</span> Export SVG
+        </button>
+        <button id="btn-export-png" class="tool-btn" title="Export PNG" disabled>
+          <span class="icon">🖼️</span> Export PNG
+        </button>
+      </div>
+      <div class="tool-group">
+        <button id="btn-undo" class="tool-btn" title="Undo" disabled>
+          <span class="icon">↩️</span> Undo
+        </button>
+        <button id="btn-redo" class="tool-btn" title="Redo" disabled>
+          <span class="icon">↪️</span> Redo
+        </button>
+      </div>
+    </div>
+
+    <div class="workspace">
+      <!-- Side panel -->
+      <aside class="side-panel">
+        <!-- PNG conversion options -->
+        <section id="section-convert" class="panel-section">
+          <h3>PNG to SVG Conversion</h3>
+          <div class="control">
+            <label>Mode</label>
+            <select id="convert-mode">
+              <option value="hq">High Quality (Recommended)</option>
+              <option value="color">Color vector (multi-layer)</option>
+              <option value="mono">Monochrome</option>
+            </select>
+          </div>
+          <div class="control" id="color-count-control">
+            <label>Color layers: <span id="color-count-val">10</span></label>
+            <input type="range" id="convert-colors" min="2" max="16" value="10">
+          </div>
+          <div class="control">
+            <label>Detail level: <span id="turd-val">1</span></label>
+            <input type="range" id="convert-turd" min="0" max="20" value="1">
+          </div>
+          <div class="control">
+            <label>Threshold: <span id="threshold-val">128</span></label>
+            <input type="range" id="convert-threshold" min="0" max="255" value="128">
+          </div>
+          <button id="btn-reconvert" class="action-btn" style="display:none">Re-convert</button>
+        </section>
+
+        <!-- Smooth -->
+        <section id="section-smooth" class="panel-section">
+          <h3>Smooth Paths</h3>
+          <div class="control">
+            <label>Smoothing: <span id="smooth-val">0.5</span></label>
+            <input type="range" id="smooth-amount" min="0" max="2" step="0.1" value="0.5">
+          </div>
+          <button id="btn-smooth" class="action-btn" disabled>Apply Smoothing</button>
+        </section>
+
+        <!-- Components / Split -->
+        <section id="section-components" class="panel-section">
+          <h3>Components</h3>
+          <p class="hint">Click elements in the canvas to select them. Use Shift+Click for multi-select.</p>
+          <div id="component-list"></div>
+          <div class="button-row">
+            <button id="btn-group" class="action-btn small" disabled>Group Selected</button>
+            <button id="btn-ungroup" class="action-btn small" disabled>Ungroup</button>
+          </div>
+          <div class="button-row">
+            <button id="btn-delete-selected" class="action-btn small danger" disabled>Delete Selected</button>
+            <button id="btn-extract" class="action-btn small" disabled>Extract Selected</button>
+          </div>
+        </section>
+
+        <!-- Color Palette -->
+        <section id="section-palette" class="panel-section">
+          <h3>Color Palette</h3>
+          <p class="hint">Pick a base color — the image will be recolored using shades of it, preserving the original luminance relationships.</p>
+          <div class="color-picker-area">
+            <canvas id="color-wheel" width="220" height="220"></canvas>
+            <div class="control" style="margin-top:8px">
+              <label>Lightness: <span id="lightness-val">50%</span></label>
+              <input type="range" id="lightness-slider" min="10" max="90" value="50">
+            </div>
+          </div>
+          <div class="selected-color-row">
+            <div id="selected-color-preview" class="selected-color-swatch" style="background:#3388ff"></div>
+            <input type="color" id="palette-color" value="#3388ff">
+            <span id="palette-hex" class="palette-hex">#3388ff</span>
+          </div>
+          <button id="btn-recolor" class="action-btn" disabled>Recolor Image</button>
+        </section>
+
+        <!-- Export Presets -->
+        <section id="section-export-presets" class="panel-section">
+          <h3>Export for Social Media</h3>
+          <div class="control">
+            <label>Output Directory</label>
+            <div class="output-dir-row">
+              <input type="text" id="output-dir" placeholder="~/Downloads" readonly>
+              <button id="btn-change-dir" class="action-btn small" style="flex:0 0 auto; width: auto;">Change</button>
+            </div>
+          </div>
+          <div class="control-row">
+            <div class="control" style="flex:1">
+              <label>Platform</label>
+              <select id="export-platform"></select>
+            </div>
+            <div class="control" style="flex:0 0 80px">
+              <label>Format</label>
+              <select id="export-format">
+                <option value="png">PNG</option>
+                <option value="svg">SVG</option>
+              </select>
+            </div>
+          </div>
+          <div id="preset-list" class="preset-list"></div>
+          <div class="custom-export">
+            <h4>Custom Size</h4>
+            <div class="custom-dims-row">
+              <input type="number" id="custom-width" placeholder="Width" value="1920" min="1">
+              <span>×</span>
+              <input type="number" id="custom-height" placeholder="Height" value="1080" min="1">
+            </div>
+            <button id="btn-export-custom" class="action-btn" disabled>Export Custom Size</button>
+          </div>
+        </section>
+
+        <!-- Text Edit -->
+        <section id="section-text" class="panel-section">
+          <h3>Text Replace</h3>
+          <p class="hint">Find and replace text rendered as SVG paths. Works best with clean SVGs.</p>
+          <div class="control">
+            <label>Find text</label>
+            <input type="text" id="text-find" placeholder="e.g. Beer">
+          </div>
+          <div class="control">
+            <label>Replace with</label>
+            <input type="text" id="text-replace" placeholder="e.g. Travel">
+          </div>
+          <div class="control">
+            <label>Font</label>
+            <select id="text-font">
+              <option value="Arial Black">Arial Black</option>
+              <option value="Impact">Impact</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Verdana">Verdana</option>
+              <option value="Trebuchet MS">Trebuchet MS</option>
+              <option value="Courier New">Courier New</option>
+            </select>
+          </div>
+          <button id="btn-replace-text" class="action-btn" disabled>Replace Text</button>
+        </section>
+      </aside>
+
+      <!-- Canvas area -->
+      <div class="canvas-area">
+        <div id="canvas-container" class="canvas-container">
+          <div id="drop-zone" class="drop-zone">
+            <div class="drop-content">
+              <span class="drop-icon">📁</span>
+              <p>Drop a PNG or SVG here</p>
+              <p class="small">or use the Import buttons above</p>
+            </div>
+          </div>
+          <div id="svg-canvas" class="svg-canvas" style="display:none"></div>
+        </div>
+        <div class="canvas-footer">
+          <span id="status-text">Ready</span>
+          <span id="zoom-display">100%</span>
+          <input type="range" id="zoom-slider" min="10" max="300" value="100">
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Hidden file inputs -->
+  <input type="file" id="file-png" accept=".png,.jpg,.jpeg,.webp,.gif,.bmp" style="display:none">
+  <input type="file" id="file-svg" accept=".svg" style="display:none">
+
+  <script type="module" src="bundle.js"></script>
+</body>
+</html>
