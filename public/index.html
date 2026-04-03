@@ -81,7 +81,8 @@
         <!-- Components / Split -->
         <section id="section-components" class="panel-section">
           <h3>Components</h3>
-          <p class="hint">Click elements in the canvas to select them. Use Shift+Click for multi-select.</p>
+          <p class="hint">For HQ images, click <strong>Detect Components</strong> first to identify separate objects, then click a component to select it.</p>
+          <button id="btn-detect-components" class="action-btn" disabled>Detect Components</button>
           <div id="component-list"></div>
           <div class="button-row">
             <button id="btn-group" class="action-btn small" disabled>Group Selected</button>
@@ -101,14 +102,19 @@
             <canvas id="color-wheel" width="220" height="220"></canvas>
             <div class="control" style="margin-top:8px">
               <label>Lightness: <span id="lightness-val">50%</span></label>
-              <input type="range" id="lightness-slider" min="10" max="90" value="50">
+              <input type="range" id="lightness-slider" min="2" max="98" value="50">
             </div>
           </div>
-          <div class="selected-color-row">
-            <div id="selected-color-preview" class="selected-color-swatch" style="background:#3388ff"></div>
-            <input type="color" id="palette-color" value="#3388ff">
-            <span id="palette-hex" class="palette-hex">#3388ff</span>
+          <input type="color" id="palette-color" value="#3388ff" style="display:none">
+          <div class="control" style="margin-top:8px">
+            <label>Depth: <span id="depth-val">0</span></label>
+            <input type="range" id="depth-slider" min="-100" max="100" value="0">
           </div>
+          <div style="display:flex;gap:6px;margin:8px 0">
+            <div id="preview-dark" style="flex:1;height:36px;border-radius:6px;border:2px solid var(--border);background:#1a3366" title="Darkest shade"></div>
+            <div id="preview-light" style="flex:1;height:36px;border-radius:6px;border:2px solid var(--border);background:#6699ff" title="Lightest shade"></div>
+          </div>
+          <div style="text-align:center;font-size:0.85em;opacity:0.6;margin-bottom:4px" id="palette-hex">#3388ff</div>
           <button id="btn-recolor" class="action-btn" disabled>Recolor Image</button>
         </section>
 
@@ -150,14 +156,14 @@
         <!-- Text Edit -->
         <section id="section-text" class="panel-section">
           <h3>Text Replace</h3>
-          <p class="hint">Find and replace text rendered as SVG paths. Works best with clean SVGs.</p>
+          <p class="hint">Use <strong>Detect Components</strong> above, then click a component to select it. Replace with text, emoji, or leave empty to remove it.</p>
           <div class="control">
-            <label>Find text</label>
-            <input type="text" id="text-find" placeholder="e.g. Beer">
+            <label>Find / Select <span style="opacity:0.5;font-size:0.8em">(click a detected component, or type text)</span></label>
+            <input type="text" id="text-find" placeholder="e.g. Beer or [Left]">
           </div>
           <div class="control">
-            <label>Replace with</label>
-            <input type="text" id="text-replace" placeholder="e.g. Travel">
+            <label>Replace with <span style="opacity:0.5;font-size:0.8em">(text, emoji, or leave empty to remove)</span></label>
+            <input type="text" id="text-replace" placeholder="e.g. Travel, ☕, or empty to remove">
           </div>
           <div class="control">
             <label>Font</label>
