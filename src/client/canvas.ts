@@ -80,8 +80,10 @@ function makeElementsSelectable(svg: Element): void {
 
 function handleElementClick(e: Event): void {
   e.stopPropagation();
-  const el = e.target as SVGElement;
   const mouseEvent = e as MouseEvent;
+  // If inside a detected component group, select the group instead of the individual path
+  const componentGroup = (e.target as Element).closest('g[data-component]');
+  const el = (componentGroup || e.target) as SVGElement;
 
   if (mouseEvent.shiftKey) {
     if (state.selectedElements.includes(el)) {

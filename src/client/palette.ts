@@ -12,15 +12,41 @@ export function initPalette(): void {
   const colorWheel = document.getElementById('color-wheel') as HTMLCanvasElement;
   const lightnessSlider = document.getElementById('lightness-slider') as HTMLInputElement;
   const lightnessVal = document.getElementById('lightness-val')!;
-  const preview = document.getElementById('selected-color-preview')!;
   const hexLabel = document.getElementById('palette-hex')!;
+  const previewDark = document.getElementById('preview-dark')!;
+  const previewLight = document.getElementById('preview-light')!;
+  const depthSlider = document.getElementById('depth-slider') as HTMLInputElement;
+  const depthVal = document.getElementById('depth-val')!;
 
   let currentLightness = 50;
 
   function updateSelectedColor(hex: string): void {
     colorInput.value = hex;
-    preview.style.background = hex;
     hexLabel.textContent = hex;
+    updateGradientPreview();
+  }
+
+  /** Show dark/light preview swatches. Left = exact picked color, right = proportionally lighter. */
+  function updateGradientPreview(): void {
+    const baseHSL = hexToHSL(colorInput.value);
+    const depth = parseInt(depthSlider.value) / 100;
+
+    // Left box = exact picked color (what the darkest parts of the image will become)
+    previewDark.style.background = colorInput.value;
+
+    // Right box = lighter shade, preserving the original image's dark-to-light ratio (~0.45)
+    // Depth slider shifts the light end: negative = more contrast, positive = more washed out
+    const ORIGINAL_RANGE = 0.45;
+    const lightL = Math.min(0.97, baseHSL.l + ORIGINAL_RANGE + depth * 0.2);
+    const lightS = Math.max(0.05, baseHSL.s * (0.4 + depth * 0.15));
+    const lightHSL = { h: baseHSL.h, s: lightS, l: lightL };
+    previewLight.style.background = hslToCss(lightHSL);
+
+    hexLabel.textContent = colorInput.value;
+  }
+
+  function hslToCss(hsl: HSL): string {
+    return `hsl(${Math.round(hsl.h * 360)}, ${Math.round(hsl.s * 100)}%, ${Math.round(hsl.l * 100)}%)`;
   }
 
   // Draw the color wheel
@@ -66,6 +92,7 @@ export function initPalette(): void {
   }
 
   drawWheel();
+  updateGradientPreview();
 
   // Click on wheel to pick color
   colorWheel.addEventListener('click', (e: MouseEvent) => {
@@ -99,19 +126,28 @@ export function initPalette(): void {
     currentLightness = parseInt(lightnessSlider.value);
     lightnessVal.textContent = `${currentLightness}%`;
     drawWheel();
+    updateGradientPreview();
   });
 
   // Native color input sync
   colorInput.addEventListener('input', () => {
-    updateSelectedColor(colorInput.value);
+    hexLabel.textContent = colorInput.value;
+    updateGradientPreview();
+  });
+
+  // Depth slider updates preview in real-time
+  depthSlider.addEventListener('input', () => {
+    depthVal.textContent = depthSlider.value;
+    updateGradientPreview();
   });
 
   recolorBtn.addEventListener('click', () => {
-    recolorImage(colorInput.value);
+    const depth = parseInt(depthSlider.value) / 100; // -1 to +1
+    recolorImage(colorInput.value, depth);
   });
 }
 
-function recolorImage(baseColorHex: string): void {
+function recolorImage(baseColorHex: string, depth: number = 0): void {
   const svgString = getCurrentSVG();
   if (!svgString) return;
 
@@ -129,7 +165,7 @@ function recolorImage(baseColorHex: string): void {
 
   if (pixelLayer && imageEl) {
     log.info('HQ mode detected — applying SVG filter recoloring');
-    recolorHQMode(doc, svg, imageEl, baseHSL, baseColorHex);
+    recolorHQMode(doc, svg, imageEl, baseHSL, baseColorHex, depth);
   } else {
     log.info('Vector mode — recoloring path fills');
     recolorVectorMode(doc, svg, baseHSL, baseColorHex);
@@ -148,7 +184,8 @@ function recolorHQMode(
   svg: SVGSVGElement,
   imageEl: Element,
   baseHSL: HSL,
-  baseColorHex: string
+  baseColorHex: string,
+  depth: number = 0,
 ): void {
   // Compute hue rotation angle
   // The original image is roughly orange (hue ~30°)
@@ -179,8 +216,11 @@ function recolorHQMode(
     0, 0, 0, 1, 0
   ];
 
-  // Lightness adjustment
-  const lightnessOffset = (baseHSL.l - 0.5) * 0.5;
+  // Lightness adjustment: make the picked color the darkest tone in the output.
+  // The original image's dark regions are roughly L=0.25. The offset shifts them
+  // to the picked color's lightness. Depth further adjusts contrast.
+  const ORIGINAL_DARK_L = 0.25;
+  const lightnessOffset = (baseHSL.l - ORIGINAL_DARK_L) * 0.9 + depth * 0.35;
   matrix[4] = lightnessOffset;
   matrix[9] = lightnessOffset;
   matrix[14] = lightnessOffset;
@@ -209,11 +249,14 @@ function recolorHQMode(
   feMatrix.setAttribute('values', matrixStr);
   filter.appendChild(feMatrix);
 
-  // Apply filter to the pixel layer
+  // Apply filter to the pixel layer and any replaced-text images
   const pixelLayer = doc.getElementById('pixel-layer');
   if (pixelLayer) {
     pixelLayer.setAttribute('filter', 'url(#recolor-filter)');
   }
+  doc.querySelectorAll('image.replaced-text').forEach(img => {
+    img.setAttribute('filter', 'url(#recolor-filter)');
+  });
 
   // Also recolor the vector layer if visible
   const vectorLayer = doc.getElementById('vector-layer');

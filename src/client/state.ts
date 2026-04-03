@@ -65,7 +65,7 @@ export function enableEditingButtons(): void {
   const ids = [
     'btn-export-svg', 'btn-export-png', 'btn-smooth',
     'btn-recolor', 'btn-replace-text', 'btn-reconvert',
-    'btn-export-custom',
+    'btn-export-custom', 'btn-detect-components',
   ];
   ids.forEach(id => {
     const btn = document.getElementById(id) as HTMLButtonElement | null;
