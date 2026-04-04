@@ -1,9 +1,13 @@
 /**
- * SVG path smoothing — reduces noise and simplifies paths
- * while preserving the overall shape. Works on each subpath independently.
+ * SVG path smoothing — reduces noise in traced vector paths.
  *
- * Uses a point-reduction approach (Ramer-Douglas-Peucker) rather than
- * re-interpolation, so existing cubic beziers aren't destroyed.
+ * Strategy: parse each subpath into its bezier segments (preserving all
+ * control points), apply Laplacian smoothing to the anchor positions only,
+ * then shift each control point by the same delta as its associated anchor.
+ *
+ * This keeps the bezier structure and local curve shapes intact — only the
+ * anchor positions move, and the control points ride along with them.
+ * No rebuilding with Catmull-Rom; the original curves are never discarded.
  */
 import { setStatus } from './state.js';
 import { renderSVG, getCurrentSVG } from './canvas.js';
@@ -65,225 +69,198 @@ function applySmoothing(amount: number): void {
 
 interface Point { x: number; y: number; }
 
+interface Segment {
+  kind: 'C' | 'L';
+  // absolute coords of end anchor
+  x: number; y: number;
+  // control points (only meaningful for kind === 'C')
+  cp1x: number; cp1y: number;
+  cp2x: number; cp2y: number;
+}
+
 /**
  * Process a compound path (multiple M...Z subpaths).
- * Parse into tokens, identify subpath boundaries, simplify each subpath's
- * control points, then reconstruct.
  */
 function smoothCompoundPath(d: string, amount: number): string {
   if (amount === 0) return d;
 
-  // Tolerance for point reduction: higher amount = more simplification
-  const tolerance = amount * 2;
+  // iterations: 1 at amount=0.1, up to 8 at amount=2
+  const iterations = Math.max(1, Math.round(amount * 4));
 
-  // Split into subpath strings at each M/m command
-  const subpathStrings = splitSubpathStrings(d);
+  const subpathStrings = d.split(/(?=[Mm])/).map(s => s.trim()).filter(Boolean);
 
-  return subpathStrings.map(sub => {
-    return simplifySubpathString(sub, tolerance);
-  }).join(' ');
+  return subpathStrings.map(sub => smoothSubpath(sub, iterations)).join(' ');
 }
 
 /**
- * Split a path d-string into subpath strings.
- * Each starts with M/m and optionally ends with Z/z.
+ * Smooth a single subpath.
+ *
+ * 1. Parse into a start anchor + list of segments (each segment knows its
+ *    end anchor and — for cubic beziers — both control points).
+ * 2. Collect all anchor positions into an array and apply Laplacian smoothing.
+ * 3. For each segment, compute how much its start and end anchors moved, then
+ *    translate the control points by those same deltas.
+ * 4. Serialise back to a path string with the same command types.
  */
-function splitSubpathStrings(d: string): string[] {
-  const result: string[] = [];
-  // Split at M commands but keep the M
-  const parts = d.split(/(?=[Mm])/);
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (trimmed) result.push(trimmed);
-  }
-  return result;
-}
-
-/**
- * Simplify a single subpath string by:
- * 1. Extracting all endpoint coordinates
- * 2. Applying RDP point reduction
- * 3. Rebuilding as smooth cubic beziers
- */
-function simplifySubpathString(subpath: string, tolerance: number): string {
+function smoothSubpath(subpath: string, iterations: number): string {
   const commands = parseCommands(subpath);
   if (commands.length < 2) return subpath;
 
-  // Extract all endpoints with their absolute positions
-  const endpoints: Point[] = [];
-  let cx = 0, cy = 0;
-  let startX = 0, startY = 0;
+  let cx = 0, cy = 0, startX = 0, startY = 0;
   let isClosed = false;
+  const segments: Segment[] = [];
 
-  for (const cmd of commands) {
-    const { type, values } = cmd;
+  for (const { type, values } of commands) {
     switch (type) {
       case 'M':
         cx = values[0]; cy = values[1];
         startX = cx; startY = cy;
-        endpoints.push({ x: cx, y: cy });
-        // M can have implicit L coords after first pair
         for (let i = 2; i < values.length; i += 2) {
+          segments.push({ kind: 'L', x: values[i], y: values[i + 1], cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 });
           cx = values[i]; cy = values[i + 1];
-          endpoints.push({ x: cx, y: cy });
         }
         break;
       case 'm':
         cx += values[0]; cy += values[1];
         startX = cx; startY = cy;
-        endpoints.push({ x: cx, y: cy });
         for (let i = 2; i < values.length; i += 2) {
           cx += values[i]; cy += values[i + 1];
-          endpoints.push({ x: cx, y: cy });
+          segments.push({ kind: 'L', x: cx, y: cy, cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 });
         }
         break;
       case 'L':
         for (let i = 0; i < values.length; i += 2) {
+          segments.push({ kind: 'L', x: values[i], y: values[i + 1], cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 });
           cx = values[i]; cy = values[i + 1];
-          endpoints.push({ x: cx, y: cy });
         }
         break;
       case 'l':
         for (let i = 0; i < values.length; i += 2) {
           cx += values[i]; cy += values[i + 1];
-          endpoints.push({ x: cx, y: cy });
+          segments.push({ kind: 'L', x: cx, y: cy, cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 });
         }
         break;
-      case 'H': cx = values[0]; endpoints.push({ x: cx, y: cy }); break;
-      case 'h': cx += values[0]; endpoints.push({ x: cx, y: cy }); break;
-      case 'V': cy = values[0]; endpoints.push({ x: cx, y: cy }); break;
-      case 'v': cy += values[0]; endpoints.push({ x: cx, y: cy }); break;
+      case 'H': cx = values[0]; segments.push({ kind: 'L', x: cx, y: cy, cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 }); break;
+      case 'h': cx += values[0]; segments.push({ kind: 'L', x: cx, y: cy, cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 }); break;
+      case 'V': cy = values[0]; segments.push({ kind: 'L', x: cx, y: cy, cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 }); break;
+      case 'v': cy += values[0]; segments.push({ kind: 'L', x: cx, y: cy, cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 }); break;
       case 'C':
         for (let i = 0; i < values.length; i += 6) {
+          segments.push({
+            kind: 'C',
+            cp1x: values[i],     cp1y: values[i + 1],
+            cp2x: values[i + 2], cp2y: values[i + 3],
+            x:    values[i + 4], y:    values[i + 5],
+          });
           cx = values[i + 4]; cy = values[i + 5];
-          endpoints.push({ x: cx, y: cy });
         }
         break;
       case 'c':
         for (let i = 0; i < values.length; i += 6) {
+          segments.push({
+            kind: 'C',
+            cp1x: cx + values[i],     cp1y: cy + values[i + 1],
+            cp2x: cx + values[i + 2], cp2y: cy + values[i + 3],
+            x:    cx + values[i + 4], y:    cy + values[i + 5],
+          });
           cx += values[i + 4]; cy += values[i + 5];
-          endpoints.push({ x: cx, y: cy });
         }
         break;
       case 'S':
         for (let i = 0; i < values.length; i += 4) {
+          // Treat as C with cp1 = current point (approximate)
+          segments.push({
+            kind: 'C',
+            cp1x: cx, cp1y: cy,
+            cp2x: values[i],     cp2y: values[i + 1],
+            x:    values[i + 2], y:    values[i + 3],
+          });
           cx = values[i + 2]; cy = values[i + 3];
-          endpoints.push({ x: cx, y: cy });
         }
         break;
       case 's':
         for (let i = 0; i < values.length; i += 4) {
+          segments.push({
+            kind: 'C',
+            cp1x: cx,             cp1y: cy,
+            cp2x: cx + values[i], cp2y: cy + values[i + 1],
+            x:    cx + values[i + 2], y: cy + values[i + 3],
+          });
           cx += values[i + 2]; cy += values[i + 3];
-          endpoints.push({ x: cx, y: cy });
         }
         break;
       case 'Z': case 'z':
         isClosed = true;
         cx = startX; cy = startY;
         break;
+      // Q, T, A: just track endpoint, no control-point adjustment
       default:
-        // Q, T, A etc — track endpoint
         if (values.length >= 2) {
-          if (type === type.toUpperCase()) {
-            cx = values[values.length - 2]; cy = values[values.length - 1];
-          } else {
-            cx += values[values.length - 2]; cy += values[values.length - 1];
-          }
-          endpoints.push({ x: cx, y: cy });
+          const ex = type === type.toUpperCase() ? values[values.length - 2] : cx + values[values.length - 2];
+          const ey = type === type.toUpperCase() ? values[values.length - 1] : cy + values[values.length - 1];
+          segments.push({ kind: 'L', x: ex, y: ey, cp1x: 0, cp1y: 0, cp2x: 0, cp2y: 0 });
+          cx = ex; cy = ey;
         }
         break;
     }
   }
 
-  if (endpoints.length < 3) return subpath;
+  if (segments.length < 2) return subpath;
 
-  // Apply Ramer-Douglas-Peucker simplification
-  const simplified = rdpSimplify(endpoints, tolerance);
+  // Build anchor array: index 0 = start point, index i+1 = segments[i] end
+  const n = segments.length + 1;
+  const anchors: Point[] = Array.from({ length: n }, (_, i) =>
+    i === 0 ? { x: startX, y: startY } : { x: segments[i - 1].x, y: segments[i - 1].y }
+  );
 
-  if (simplified.length < 2) return subpath;
+  // Laplacian smooth anchor positions
+  const smoothed = laplacianSmooth(anchors, iterations, isClosed);
 
-  // Rebuild as smooth cubic bezier path
-  return buildSmoothCubicPath(simplified, isClosed);
-}
+  // Serialise: for each segment, shift control points by the same delta
+  // as the anchor they are associated with (cp1 → start anchor, cp2 → end anchor)
+  const f = (v: number) => v.toFixed(2);
+  let out = `M ${f(smoothed[0].x)} ${f(smoothed[0].y)}`;
 
-/**
- * Ramer-Douglas-Peucker line simplification.
- * Removes points that are within `tolerance` distance of the line
- * between their neighbours.
- */
-function rdpSimplify(points: Point[], tolerance: number): Point[] {
-  if (points.length < 3) return points;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const dsx = smoothed[i].x     - anchors[i].x;
+    const dsy = smoothed[i].y     - anchors[i].y;
+    const dex = smoothed[i + 1].x - anchors[i + 1].x;
+    const dey = smoothed[i + 1].y - anchors[i + 1].y;
 
-  // Find the point farthest from the line between first and last
-  let maxDist = 0;
-  let maxIdx = 0;
-
-  const first = points[0];
-  const last = points[points.length - 1];
-
-  for (let i = 1; i < points.length - 1; i++) {
-    const dist = perpendicularDist(points[i], first, last);
-    if (dist > maxDist) {
-      maxDist = dist;
-      maxIdx = i;
+    if (seg.kind === 'C') {
+      out += ` C ${f(seg.cp1x + dsx)} ${f(seg.cp1y + dsy)},` +
+             ` ${f(seg.cp2x + dex)} ${f(seg.cp2y + dey)},` +
+             ` ${f(smoothed[i + 1].x)} ${f(smoothed[i + 1].y)}`;
+    } else {
+      out += ` L ${f(smoothed[i + 1].x)} ${f(smoothed[i + 1].y)}`;
     }
   }
 
-  if (maxDist > tolerance) {
-    const left = rdpSimplify(points.slice(0, maxIdx + 1), tolerance);
-    const right = rdpSimplify(points.slice(maxIdx), tolerance);
-    return [...left.slice(0, -1), ...right];
-  } else {
-    return [first, last];
-  }
-}
-
-function perpendicularDist(point: Point, lineStart: Point, lineEnd: Point): number {
-  const dx = lineEnd.x - lineStart.x;
-  const dy = lineEnd.y - lineStart.y;
-  const lenSq = dx * dx + dy * dy;
-
-  if (lenSq === 0) {
-    const ex = point.x - lineStart.x;
-    const ey = point.y - lineStart.y;
-    return Math.sqrt(ex * ex + ey * ey);
-  }
-
-  const num = Math.abs(dy * point.x - dx * point.y + lineEnd.x * lineStart.y - lineEnd.y * lineStart.x);
-  return num / Math.sqrt(lenSq);
+  if (isClosed) out += ' Z';
+  return out;
 }
 
 /**
- * Build a smooth cubic bezier path from simplified points
- * using Catmull-Rom spline interpolation.
+ * Laplacian (weighted-average) smoothing on a point array.
+ * Each iteration: p[i] = 0.25*p[i-1] + 0.5*p[i] + 0.25*p[i+1]
+ * Open-path endpoints are pinned.
  */
-function buildSmoothCubicPath(points: Point[], closed: boolean): string {
-  const f = (n: number) => n.toFixed(2);
-
-  let d = `M ${f(points[0].x)} ${f(points[0].y)}`;
-  const len = points.length;
-
-  if (len === 2) {
-    d += ` L ${f(points[1].x)} ${f(points[1].y)}`;
-  } else {
-    for (let i = 0; i < len - 1; i++) {
-      const p0 = points[closed ? (i - 1 + len) % len : Math.max(0, i - 1)];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[closed ? (i + 2) % len : Math.min(len - 1, i + 2)];
-
-      // Catmull-Rom to cubic bezier control points
-      const cp1x = p1.x + (p2.x - p0.x) / 6;
-      const cp1y = p1.y + (p2.y - p0.y) / 6;
-      const cp2x = p2.x - (p3.x - p1.x) / 6;
-      const cp2y = p2.y - (p3.y - p1.y) / 6;
-
-      d += ` C ${f(cp1x)} ${f(cp1y)}, ${f(cp2x)} ${f(cp2y)}, ${f(p2.x)} ${f(p2.y)}`;
-    }
+function laplacianSmooth(points: Point[], iterations: number, closed: boolean): Point[] {
+  let pts = points.slice();
+  const n = pts.length;
+  for (let k = 0; k < iterations; k++) {
+    pts = pts.map((p, i) => {
+      if (!closed && (i === 0 || i === n - 1)) return p;
+      const prev = pts[(i - 1 + n) % n];
+      const next = pts[(i + 1) % n];
+      return {
+        x: 0.25 * prev.x + 0.5 * p.x + 0.25 * next.x,
+        y: 0.25 * prev.y + 0.5 * p.y + 0.25 * next.y,
+      };
+    });
   }
-
-  if (closed) d += ' Z';
-  return d;
+  return pts;
 }
 
 interface ParsedCommand { type: string; values: number[]; }
@@ -292,7 +269,6 @@ function parseCommands(d: string): ParsedCommand[] {
   const commands: ParsedCommand[] = [];
   const regex = /([MmLlHhVvCcSsQqTtAaZz])([^MmLlHhVvCcSsQqTtAaZz]*)/g;
   let match: RegExpExecArray | null;
-
   while ((match = regex.exec(d)) !== null) {
     const type = match[1];
     const values = match[2].trim()

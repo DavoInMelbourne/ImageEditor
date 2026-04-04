@@ -101,7 +101,9 @@ You can recolour multiple times and use **Undo / Redo** (or Ctrl+Z / Ctrl+Shift+
 
 ### Smooth Paths
 
-Applies path simplification and smoothing to vector paths. Useful after a conversion to reduce jagged edges.
+> ⚠️ **Work in progress** — smoothing is not reliable yet and may distort paths. Best to skip this feature for now.
+
+Applies path smoothing to vector paths to reduce jagged edges.
 
 - Drag the **Smoothing** slider to set the intensity
 - Click **Apply Smoothing**
