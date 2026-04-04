@@ -19,6 +19,9 @@ export function initPalette(): void {
   const depthVal = document.getElementById('depth-val')!;
 
   let currentLightness = 50;
+  let pickedHue = 0;   // 0..1
+  let pickedSat = 0;   // 0..1
+  let hasPicked = false;
 
   function updateSelectedColor(hex: string): void {
     colorInput.value = hex;
@@ -34,10 +37,9 @@ export function initPalette(): void {
     // Left box = exact picked color (what the darkest parts of the image will become)
     previewDark.style.background = colorInput.value;
 
-    // Right box = lighter shade, preserving the original image's dark-to-light ratio (~0.45)
-    // Depth slider shifts the light end: negative = more contrast, positive = more washed out
-    const ORIGINAL_RANGE = 0.45;
-    const lightL = Math.min(0.97, baseHSL.l + ORIGINAL_RANGE + depth * 0.2);
+    // Right box = light end of the recolored range (matches what the matrix produces for white areas).
+    // Depth shifts the light end: negative = more contrast, positive = more washed out.
+    const lightL = Math.min(0.97, baseHSL.l + 0.45 + depth * 0.2);
     const lightS = Math.max(0.05, baseHSL.s * (0.4 + depth * 0.15));
     const lightHSL = { h: baseHSL.h, s: lightS, l: lightL };
     previewLight.style.background = hslToCss(lightHSL);
@@ -115,7 +117,10 @@ export function initPalette(): void {
       const angle = Math.atan2(dy, dx);
       const hue = ((angle * 180 / Math.PI) + 360) % 360;
       const sat = dist / radius;
-      const rgb = hslToRGB({ h: hue / 360, s: sat, l: currentLightness / 100 });
+      pickedHue = hue / 360;
+      pickedSat = sat;
+      hasPicked = true;
+      const rgb = hslToRGB({ h: pickedHue, s: pickedSat, l: currentLightness / 100 });
       const hex = rgbToHex(rgb);
       updateSelectedColor(hex);
     }
@@ -126,7 +131,12 @@ export function initPalette(): void {
     currentLightness = parseInt(lightnessSlider.value);
     lightnessVal.textContent = `${currentLightness}%`;
     drawWheel();
-    updateGradientPreview();
+    if (hasPicked) {
+      const rgb = hslToRGB({ h: pickedHue, s: pickedSat, l: currentLightness / 100 });
+      updateSelectedColor(rgbToHex(rgb));
+    } else {
+      updateGradientPreview();
+    }
   });
 
   // Native color input sync
@@ -187,43 +197,43 @@ function recolorHQMode(
   baseColorHex: string,
   depth: number = 0,
 ): void {
-  // Compute hue rotation angle
-  // The original image is roughly orange (hue ~30°)
-  // We need to rotate to the target hue
-  const targetHueDeg = baseHSL.h * 360;
+  // Duotone luminance-mapping matrix:
+  // Maps the original image's luminance range [DARK_L, LIGHT_L] exactly onto
+  // [picked dark color, computed light color]. Dark areas of the image become
+  // exactly the picked color; light areas become the computed light color.
+  // For a grey input (R=G=B=v): out = lerp(dark, light, (v - DARK_L) / RANGE)
+  // Calibrate to the full 0..1 luminance range so no pixels are clamped/clipped.
+  // Black (L=0) → picked dark color exactly; white (L=1) → computed light color.
+  const ORIGINAL_DARK_L = 0;
+  const ORIGINAL_LIGHT_L = 1;
+  const ORIGINAL_RANGE = ORIGINAL_LIGHT_L - ORIGINAL_DARK_L;
 
-  // Build a proper SVG color matrix for hue shifting + saturation control
-  const hueRad = (targetHueDeg - 30) * Math.PI / 180; // offset from orange
-  const cos = Math.cos(hueRad);
-  const sin = Math.sin(hueRad);
-  const sat = baseHSL.s;
+  const darkRGB = hexToRGB(baseColorHex);
+  const darkR = darkRGB.r / 255;
+  const darkG = darkRGB.g / 255;
+  const darkB = darkRGB.b / 255;
+
+  const lightHSL = {
+    h: baseHSL.h,
+    s: Math.max(0.05, baseHSL.s * (0.4 + depth * 0.15)),
+    l: Math.min(0.97, baseHSL.l + 0.45 + depth * 0.2),
+  };
+  const lightRGB = hslToRGB(lightHSL);
+  const lightR = lightRGB.r / 255;
+  const lightG = lightRGB.g / 255;
+  const lightB = lightRGB.b / 255;
+
   const lumR = 0.213, lumG = 0.715, lumB = 0.072;
+  const slopeR = (lightR - darkR) / ORIGINAL_RANGE;
+  const slopeG = (lightG - darkG) / ORIGINAL_RANGE;
+  const slopeB = (lightB - darkB) / ORIGINAL_RANGE;
 
-  // Hue rotation matrix combined with saturation
   const matrix = [
-    lumR + cos * (1 - lumR) * sat + sin * (-lumR) * sat,
-    lumG + cos * (-lumG) * sat + sin * (-lumG) * sat,
-    lumB + cos * (-lumB) * sat + sin * (1 - lumB) * sat,
-    0, 0,
-    lumR + cos * (-lumR) * sat + sin * (0.143) * sat,
-    lumG + cos * (1 - lumG) * sat + sin * (0.140) * sat,
-    lumB + cos * (-lumB) * sat + sin * (-0.283) * sat,
-    0, 0,
-    lumR + cos * (-lumR) * sat + sin * (-(1 - lumR)) * sat,
-    lumG + cos * (-lumG) * sat + sin * (lumG) * sat,
-    lumB + cos * (1 - lumB) * sat + sin * (lumB) * sat,
-    0, 0,
-    0, 0, 0, 1, 0
+    slopeR * lumR, slopeR * lumG, slopeR * lumB, 0, darkR - slopeR * ORIGINAL_DARK_L,
+    slopeG * lumR, slopeG * lumG, slopeG * lumB, 0, darkG - slopeG * ORIGINAL_DARK_L,
+    slopeB * lumR, slopeB * lumG, slopeB * lumB, 0, darkB - slopeB * ORIGINAL_DARK_L,
+    0, 0, 0, 1, 0,
   ];
-
-  // Lightness adjustment: make the picked color the darkest tone in the output.
-  // The original image's dark regions are roughly L=0.25. The offset shifts them
-  // to the picked color's lightness. Depth further adjusts contrast.
-  const ORIGINAL_DARK_L = 0.25;
-  const lightnessOffset = (baseHSL.l - ORIGINAL_DARK_L) * 0.9 + depth * 0.35;
-  matrix[4] = lightnessOffset;
-  matrix[9] = lightnessOffset;
-  matrix[14] = lightnessOffset;
 
   const matrixStr = matrix.map(v => v.toFixed(4)).join(' ');
 
