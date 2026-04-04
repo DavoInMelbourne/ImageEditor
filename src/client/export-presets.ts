@@ -25,7 +25,7 @@ const PRESETS: ExportPreset[] = [
   { name: 'Landscape Post',  platform: 'Instagram',  width: 1080, height: 566,  category: 'Post' },
 
   // Facebook / Meta
-  { name: 'Cover Photo',     platform: 'Facebook',   width: 820,  height: 312,  category: 'Banner' },
+  { name: 'Cover Photo',     platform: 'Facebook',   width: 820,  height: 360,  category: 'Banner' },
   { name: 'Post',            platform: 'Facebook',   width: 1200, height: 630,  category: 'Post' },
   { name: 'Profile Photo',   platform: 'Facebook',   width: 170,  height: 170,  category: 'Profile' },
 
@@ -34,12 +34,12 @@ const PRESETS: ExportPreset[] = [
   { name: 'Post Image',      platform: 'X / Twitter', width: 1200, height: 675,  category: 'Post' },
 
   // Bluesky
-  { name: 'Banner',          platform: 'Bluesky',    width: 3000, height: 1000, category: 'Banner' },
+  { name: 'Banner',          platform: 'Bluesky',    width: 1500, height: 500,  category: 'Banner' },
   { name: 'Post Image',      platform: 'Bluesky',    width: 1200, height: 675,  category: 'Post' },
 
   // Ko-fi
-  { name: 'Shop Banner',     platform: 'Ko-fi',      width: 1600, height: 400,  category: 'Banner' },
-  { name: 'Post Image',      platform: 'Ko-fi',      width: 1280, height: 720,  category: 'Post' },
+  { name: 'Shop Banner',     platform: 'Ko-fi',      width: 1200, height: 400,  category: 'Banner' },
+  { name: 'Post Image',      platform: 'Ko-fi',      width: 1200, height: 600,  category: 'Post' },
 
   // Flickr
   { name: 'Cover Photo',     platform: 'Flickr',     width: 2048, height: 492,  category: 'Banner' },
