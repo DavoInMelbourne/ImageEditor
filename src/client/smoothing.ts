@@ -67,20 +67,20 @@ interface Point { x: number; y: number; }
 
 /**
  * Process a compound path (multiple M...Z subpaths).
- * Parse into tokens, identify subpath boundaries, simplify each subpath's
- * control points, then reconstruct.
+ * Applies Laplacian (weighted-average) smoothing to anchor point positions.
+ * No points are removed — topology is always preserved.
  */
 function smoothCompoundPath(d: string, amount: number): string {
   if (amount === 0) return d;
 
-  // Tolerance for point reduction: higher amount = more simplification
-  const tolerance = amount * 2;
+  // Each iteration nudges every point 25% toward the midpoint of its neighbours.
+  // More iterations = smoother result without ever removing points.
+  const iterations = Math.max(1, Math.round(amount * 6)); // 1–12
 
-  // Split into subpath strings at each M/m command
   const subpathStrings = splitSubpathStrings(d);
 
   return subpathStrings.map(sub => {
-    return simplifySubpathString(sub, tolerance);
+    return smoothSubpathLaplacian(sub, iterations);
   }).join(' ');
 }
 
@@ -100,16 +100,28 @@ function splitSubpathStrings(d: string): string[] {
 }
 
 /**
- * Simplify a single subpath string by:
- * 1. Extracting all endpoint coordinates
- * 2. Applying RDP point reduction
- * 3. Rebuilding as smooth cubic beziers
+ * Smooth a single subpath by:
+ * 1. Extracting anchor-point coordinates (no bezier control points)
+ * 2. Applying Laplacian smoothing (weighted neighbour average, N iterations)
+ * 3. Rebuilding as smooth cubic beziers via Catmull-Rom
+ *
+ * Using only anchor points (not intermediate bezier samples) means the
+ * point density reflects the original path topology, so each iteration
+ * produces a small, predictable nudge rather than wholesale shape change.
  */
-function simplifySubpathString(subpath: string, tolerance: number): string {
+function smoothSubpathLaplacian(subpath: string, iterations: number): string {
   const commands = parseCommands(subpath);
   if (commands.length < 2) return subpath;
 
-  // Extract all endpoints with their absolute positions
+  const { endpoints, isClosed } = extractEndpoints(commands);
+  if (endpoints.length < 3) return subpath;
+
+  const smoothed = laplacianSmooth(endpoints, iterations, isClosed);
+  return buildSmoothCubicPath(smoothed, isClosed);
+}
+
+/** Extract absolute anchor-point coordinates from parsed commands. */
+function extractEndpoints(commands: ParsedCommand[]): { endpoints: Point[]; isClosed: boolean } {
   const endpoints: Point[] = [];
   let cx = 0, cy = 0;
   let startX = 0, startY = 0;
@@ -122,7 +134,6 @@ function simplifySubpathString(subpath: string, tolerance: number): string {
         cx = values[0]; cy = values[1];
         startX = cx; startY = cy;
         endpoints.push({ x: cx, y: cy });
-        // M can have implicit L coords after first pair
         for (let i = 2; i < values.length; i += 2) {
           cx = values[i]; cy = values[i + 1];
           endpoints.push({ x: cx, y: cy });
@@ -182,7 +193,6 @@ function simplifySubpathString(subpath: string, tolerance: number): string {
         cx = startX; cy = startY;
         break;
       default:
-        // Q, T, A etc — track endpoint
         if (values.length >= 2) {
           if (type === type.toUpperCase()) {
             cx = values[values.length - 2]; cy = values[values.length - 1];
@@ -195,62 +205,31 @@ function simplifySubpathString(subpath: string, tolerance: number): string {
     }
   }
 
-  if (endpoints.length < 3) return subpath;
-
-  // Apply Ramer-Douglas-Peucker simplification
-  const simplified = rdpSimplify(endpoints, tolerance);
-
-  if (simplified.length < 2) return subpath;
-
-  // Rebuild as smooth cubic bezier path
-  return buildSmoothCubicPath(simplified, isClosed);
+  return { endpoints, isClosed };
 }
 
 /**
- * Ramer-Douglas-Peucker line simplification.
- * Removes points that are within `tolerance` distance of the line
- * between their neighbours.
+ * Laplacian (weighted-average) smoothing.
+ * Each iteration: p[i] = 0.25*p[i-1] + 0.5*p[i] + 0.25*p[i+1]
+ * Open-path endpoints are pinned so the path doesn't drift.
  */
-function rdpSimplify(points: Point[], tolerance: number): Point[] {
-  if (points.length < 3) return points;
+function laplacianSmooth(points: Point[], iterations: number, closed: boolean): Point[] {
+  let pts = points.slice();
+  const n = pts.length;
 
-  // Find the point farthest from the line between first and last
-  let maxDist = 0;
-  let maxIdx = 0;
-
-  const first = points[0];
-  const last = points[points.length - 1];
-
-  for (let i = 1; i < points.length - 1; i++) {
-    const dist = perpendicularDist(points[i], first, last);
-    if (dist > maxDist) {
-      maxDist = dist;
-      maxIdx = i;
-    }
+  for (let k = 0; k < iterations; k++) {
+    const next = pts.map((p, i) => {
+      if (!closed && (i === 0 || i === n - 1)) return p; // pin open endpoints
+      const prev = pts[(i - 1 + n) % n];
+      const nxt  = pts[(i + 1) % n];
+      return {
+        x: 0.25 * prev.x + 0.5 * p.x + 0.25 * nxt.x,
+        y: 0.25 * prev.y + 0.5 * p.y + 0.25 * nxt.y,
+      };
+    });
+    pts = next;
   }
-
-  if (maxDist > tolerance) {
-    const left = rdpSimplify(points.slice(0, maxIdx + 1), tolerance);
-    const right = rdpSimplify(points.slice(maxIdx), tolerance);
-    return [...left.slice(0, -1), ...right];
-  } else {
-    return [first, last];
-  }
-}
-
-function perpendicularDist(point: Point, lineStart: Point, lineEnd: Point): number {
-  const dx = lineEnd.x - lineStart.x;
-  const dy = lineEnd.y - lineStart.y;
-  const lenSq = dx * dx + dy * dy;
-
-  if (lenSq === 0) {
-    const ex = point.x - lineStart.x;
-    const ey = point.y - lineStart.y;
-    return Math.sqrt(ex * ex + ey * ey);
-  }
-
-  const num = Math.abs(dy * point.x - dx * point.y + lineEnd.x * lineStart.y - lineEnd.y * lineStart.x);
-  return num / Math.sqrt(lenSq);
+  return pts;
 }
 
 /**

@@ -7,3 +7,4 @@ public/bundle.js.map
 
 .claude
 AI_CONTEXT.md
+node_modules
