@@ -4,7 +4,7 @@ import fs from 'fs';
 import { apiRouter } from './routes.js';
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3000;
+const PORT = process.env.PORT ? parseInt(process.env.PORT) : 3001;
 
 // __dirname = dist/ when bundled by esbuild
 const ROOT = path.join(__dirname, '..');

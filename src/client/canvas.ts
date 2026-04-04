@@ -44,14 +44,109 @@ export function getCurrentSVG(): string | null {
   const canvas = svgCanvas();
   const svg = canvas.querySelector('svg');
   if (!svg) return null;
-  // Clean up selection classes before export
+  return getSVGString(svg);
+}
+
+export function getSVGString(svg: Element): string {
   svg.querySelectorAll('.selected, .hoverable').forEach(el => {
     el.classList.remove('selected', 'hoverable');
   });
   const result = svg.outerHTML;
-  // Re-add hoverable
-  makeElementsSelectable(svg);
+  makeElementsSelectable(svg as SVGSVGElement);
   return result;
+}
+
+export interface TightBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export function getTightBounds(): TightBounds | null {
+  const svg = svgCanvas().querySelector('svg') as SVGSVGElement | null;
+  if (!svg) return null;
+
+  const hasPixelLayer = !!svg.querySelector('#pixel-layer');
+
+  if (hasPixelLayer) {
+    const excludedRegions: Array<{ x1: number; x2: number }> = JSON.parse(
+      svg.getAttribute('data-excluded-regions') || '[]'
+    );
+
+    if (excludedRegions.length > 0) {
+      const svgWidth = parseFloat(svg.getAttribute('width') || '0');
+      const svgHeight = parseFloat(svg.getAttribute('height') || '0');
+      if (!svgWidth || !svgHeight) return null;
+
+      const sorted = [...excludedRegions].sort((a, b) => a.x1 - b.x1);
+      
+      let visibleMinX = 0;
+      let visibleMaxX = svgWidth;
+
+      if (sorted[0].x2 > 0) {
+        visibleMinX = sorted[0].x2;
+      }
+
+      const lastRegion = sorted[sorted.length - 1];
+      if (lastRegion.x1 < svgWidth) {
+        visibleMaxX = lastRegion.x1;
+      }
+
+      if (visibleMaxX <= visibleMinX) {
+        return null;
+      }
+
+      return {
+        x: Math.floor(visibleMinX),
+        y: 0,
+        width: Math.ceil(visibleMaxX - visibleMinX),
+        height: Math.ceil(svgHeight)
+      };
+    }
+  }
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let hasContent = false;
+
+  const elements = svg.querySelectorAll(
+    'path, circle, rect, ellipse, polygon, polyline, line, text, image'
+  );
+
+  elements.forEach(el => {
+    if (el.closest('#pixel-layer')) return;
+    if (el.closest('#vector-layer') && svg.querySelector('#pixel-layer')) return;
+
+    try {
+      const bbox = (el as SVGGraphicsElement).getBBox();
+      if (bbox.width > 0 && bbox.height > 0) {
+        minX = Math.min(minX, bbox.x);
+        minY = Math.min(minY, bbox.y);
+        maxX = Math.max(maxX, bbox.x + bbox.width);
+        maxY = Math.max(maxY, bbox.y + bbox.height);
+        hasContent = true;
+      }
+    } catch {
+    }
+  });
+
+  if (!hasContent) return null;
+
+  return {
+    x: Math.floor(minX),
+    y: Math.floor(minY),
+    width: Math.ceil(maxX - minX),
+    height: Math.ceil(maxY - minY)
+  };
+}
+
+export function getOriginalDimensions(): { width: number; height: number } | null {
+  const svg = svgCanvas().querySelector('svg');
+  if (!svg) return null;
+  return {
+    width: parseInt(svg.getAttribute('width') || '0') || 0,
+    height: parseInt(svg.getAttribute('height') || '0') || 0
+  };
 }
 
 export function applyZoom(): void {
@@ -108,17 +203,19 @@ export function clearSelection(): void {
   updateSelectionButtons();
 }
 
-function updateSelectionButtons(): void {
+export function updateSelectionButtons(): void {
   const hasSelection = state.selectedElements.length > 0;
   const groupBtn = document.getElementById('btn-group') as HTMLButtonElement | null;
   const ungroupBtn = document.getElementById('btn-ungroup') as HTMLButtonElement | null;
   const deleteBtn = document.getElementById('btn-delete-selected') as HTMLButtonElement | null;
   const extractBtn = document.getElementById('btn-extract') as HTMLButtonElement | null;
+  const toolbarDeleteBtn = document.getElementById('btn-delete-toolbar') as HTMLButtonElement | null;
 
   if (groupBtn) groupBtn.disabled = state.selectedElements.length < 2;
   if (ungroupBtn) ungroupBtn.disabled = !hasSelection;
   if (deleteBtn) deleteBtn.disabled = !hasSelection;
   if (extractBtn) extractBtn.disabled = !hasSelection;
+  if (toolbarDeleteBtn) toolbarDeleteBtn.disabled = !hasSelection;
 }
 
 export function showLoading(): void {

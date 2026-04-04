@@ -38,7 +38,7 @@ npm install       # first time only
 npm run dev       # starts the server and watches for code changes
 ```
 
-Then open **http://localhost:3000** in your browser.
+Then open **http://localhost:3001** in your browser.
 
 To build without the dev watcher:
 
@@ -222,7 +222,7 @@ No frontend framework — the UI is straightforward enough that React/Vue would 
 ```
 src/
   server/
-    index.ts          Express entry point (port 3000)
+    index.ts          Express entry point (port 3001)
     routes.ts         API endpoints
     conversion.ts     PNG-to-SVG pipeline
     potrace.d.ts      Type declarations for potrace

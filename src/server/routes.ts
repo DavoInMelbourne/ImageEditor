@@ -109,5 +109,21 @@ export function apiRouter(uploadsDir: string): Router {
     }
   });
 
+  router.post('/save-base64-png', async (req: Request, res: Response) => {
+    try {
+      const { pngData, filename, width, height } = req.body as {
+        pngData: string; filename: string; width: number; height: number;
+      };
+
+      const safeName = (filename || 'export').replace(/[^a-zA-Z0-9_.-]/g, '_');
+      const pngBuffer = Buffer.from(pngData, 'base64');
+      const outPath = path.join(outputDir, safeName);
+      fs.writeFileSync(outPath, pngBuffer);
+      res.json({ path: outPath });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }

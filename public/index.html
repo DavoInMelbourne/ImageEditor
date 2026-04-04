@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SVG Image Editor</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎨</text></svg>">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -35,6 +36,14 @@
         </button>
         <button id="btn-redo" class="tool-btn" title="Redo" disabled>
           <span class="icon">↪️</span> Redo
+        </button>
+      </div>
+      <div class="tool-group">
+        <button id="btn-delete-toolbar" class="tool-btn" title="Delete Selected" disabled>
+          <span class="icon">🗑️</span> Delete
+        </button>
+        <button id="btn-eraser" class="tool-btn" title="Eraser — drag to erase areas">
+          <span class="icon">🧹</span> Eraser
         </button>
       </div>
     </div>
@@ -81,7 +90,7 @@
         <!-- Components / Split -->
         <section id="section-components" class="panel-section">
           <h3>Components</h3>
-          <p class="hint">For HQ images, click <strong>Detect Components</strong> first to identify separate objects, then click a component to select it.</p>
+          <p class="hint">For HQ images, click <strong>Detect Components</strong> first to identify separate objects, then click a component to select it. <strong>Delete Selected</strong> removes it (or clears via text replace). <strong>Extract Selected</strong> saves just that component as a new SVG file.</p>
           <button id="btn-detect-components" class="action-btn" disabled>Detect Components</button>
           <div id="component-list"></div>
           <div class="button-row">
@@ -141,6 +150,12 @@
               </select>
             </div>
           </div>
+          <div class="control">
+            <label class="checkbox-label">
+              <input type="checkbox" id="auto-crop" checked>
+              Auto-crop to content
+            </label>
+          </div>
           <div id="preset-list" class="preset-list"></div>
           <div class="custom-export">
             <h4>Custom Size</h4>
@@ -156,7 +171,7 @@
         <!-- Text Edit -->
         <section id="section-text" class="panel-section">
           <h3>Text Replace</h3>
-          <p class="hint">Use <strong>Detect Components</strong> above, then click a component to select it. Replace with text, emoji, or leave empty to remove it.</p>
+          <p class="hint">Use <strong>Detect Components</strong> above, then click a component to select it. Replace with text, emoji, or leave empty to remove it. Or use <strong>Delete Selected</strong> in the Components section.</p>
           <div class="control">
             <label>Find / Select <span style="opacity:0.5;font-size:0.8em">(click a detected component, or type text)</span></label>
             <input type="text" id="text-find" placeholder="e.g. Beer or [Left]">

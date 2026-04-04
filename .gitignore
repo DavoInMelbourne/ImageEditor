@@ -5,3 +5,7 @@ public/bundle.js
 public/bundle.js.map
 *.tgz
 
+
+.claude
+AI_CONTEXT.md
+

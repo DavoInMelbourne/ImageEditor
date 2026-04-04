@@ -2,7 +2,7 @@
  * SVG component management — split, group, ungroup, delete, extract.
  */
 import { state, setStatus, pushState } from './state.js';
-import { renderSVG, getCurrentSVG, clearSelection } from './canvas.js';
+import { renderSVG, getCurrentSVG, clearSelection, updateSelectionButtons } from './canvas.js';
 
 export function initComponents(): void {
   document.getElementById('btn-group')!.addEventListener('click', groupSelected);
@@ -78,6 +78,7 @@ export function buildComponentList(): void {
         if (findInput) findInput.value = `[${label}]`;
       }
       buildComponentList();
+      updateSelectionButtons();
     });
 
     const visBtn = item.querySelector('.vis-toggle')!;
@@ -172,19 +173,77 @@ function ungroupSelected(): void {
   }
 }
 
-function deleteSelected(): void {
+export function deleteSelected(): void {
   const svgCanvas = document.getElementById('svg-canvas')!;
-  const svg = svgCanvas.querySelector('svg');
+  const svg = svgCanvas.querySelector('svg') as SVGSVGElement | null;
   if (!svg) return;
 
-  const count = state.selectedElements.length;
-  state.selectedElements.forEach(el => {
-    el.parentNode?.removeChild(el);
-  });
+  const pixelLayer = svg.querySelector('#pixel-layer');
+  const pixelImgEl = pixelLayer?.querySelector('image');
 
-  clearSelection();
-  renderSVG(svg.outerHTML);
-  setStatus(`Deleted ${count} element(s)`);
+  if (pixelImgEl && pixelLayer) {
+    const count = state.selectedElements.length;
+    const svgWidth = parseFloat(svg.getAttribute('width') || '0');
+    const svgHeight = parseFloat(svg.getAttribute('height') || '0');
+
+    const existing: Array<{ x1: number; x2: number }> =
+      JSON.parse(svg.getAttribute('data-excluded-regions') || '[]');
+
+    for (const el of state.selectedElements) {
+      const regionX1 = parseFloat(el.getAttribute('data-region-x1') || '0');
+      const regionX2 = parseFloat(el.getAttribute('data-region-x2') || '0');
+      
+      if (regionX2 > regionX1) {
+        const margin = 2;
+        existing.push({ 
+          x1: Math.max(0, regionX1 - margin), 
+          x2: Math.min(svgWidth, regionX2 + margin) 
+        });
+      } else {
+        const bbox = (el as SVGGraphicsElement).getBBox();
+        const x1 = Math.floor(bbox.x) - 4;
+        const x2 = Math.ceil(bbox.x + bbox.width) + 4;
+        existing.push({ x1, x2 });
+      }
+    }
+
+    svg.setAttribute('data-excluded-regions', JSON.stringify(existing));
+
+    let defs = svg.querySelector('defs');
+    if (!defs) {
+      defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+      svg.insertBefore(defs, svg.firstChild);
+    }
+
+    defs.querySelector('#hq-component-clip')?.remove();
+
+    const clipOuterLeft = -10;
+    const clipOuterRight = svgWidth + 10;
+    const holes = existing
+      .map(r => `M ${r.x1} 0 H ${r.x2} V ${svgHeight} H ${r.x1} Z`)
+      .join(' ');
+    const clipPath = document.createElementNS('http://www.w3.org/2000/svg', 'clipPath');
+    clipPath.setAttribute('id', 'hq-component-clip');
+    const maskPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    maskPath.setAttribute('clip-rule', 'evenodd');
+    maskPath.setAttribute('d', `M ${clipOuterLeft} 0 H ${clipOuterRight} V ${svgHeight} H ${clipOuterLeft} Z ${holes}`);
+    clipPath.appendChild(maskPath);
+    defs.appendChild(clipPath);
+    pixelImgEl.setAttribute('clip-path', 'url(#hq-component-clip)');
+
+    clearSelection();
+    renderSVG(svg.outerHTML);
+    setStatus(`Deleted ${count} element(s)`);
+  } else {
+    const count = state.selectedElements.length;
+    state.selectedElements.forEach(el => {
+      el.parentNode?.removeChild(el);
+    });
+
+    clearSelection();
+    renderSVG(svg.outerHTML);
+    setStatus(`Deleted ${count} element(s)`);
+  }
 }
 
 /**

@@ -2,9 +2,39 @@
  * Export presets for social media platforms + custom dimensions.
  */
 import { setStatus } from './state.js';
-import { getCurrentSVG, showLoading, hideLoading } from './canvas.js';
+import { getCurrentSVG, getTightBounds, TightBounds, showLoading, hideLoading } from './canvas.js';
 import { state } from './state.js';
 import { log } from './logger.js';
+
+interface ExportPreset {
+  name: string;
+  platform: string;
+  width: number;
+  height: number;
+  category: string;
+}
+
+function applyBoundsToSVG(svg: string, bounds: TightBounds): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(svg, 'image/svg+xml');
+  const svgEl = doc.querySelector('svg');
+  if (!svgEl) return svg;
+
+  const origWidth = parseInt(svgEl.getAttribute('width') || '0') || 0;
+  const origHeight = parseInt(svgEl.getAttribute('height') || '0') || 0;
+
+  svgEl.setAttribute('viewBox', `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`);
+
+  if (origWidth > 0 && origHeight > 0) {
+    svgEl.setAttribute('width', String(origWidth));
+    svgEl.setAttribute('height', String(origHeight));
+  } else {
+    svgEl.setAttribute('width', String(bounds.width));
+    svgEl.setAttribute('height', String(bounds.height));
+  }
+
+  return new XMLSerializer().serializeToString(svgEl);
+}
 
 interface ExportPreset {
   name: string;
@@ -67,6 +97,11 @@ export function initExportPresets(): void {
   const customBtn = document.getElementById('btn-export-custom') as HTMLButtonElement;
   const outputDirInput = document.getElementById('output-dir') as HTMLInputElement;
   const changeDirBtn = document.getElementById('btn-change-dir') as HTMLButtonElement;
+  const autoCropCheckbox = document.getElementById('auto-crop') as HTMLInputElement;
+
+  if (autoCropCheckbox) {
+    autoCropCheckbox.checked = true;
+  }
 
   // Load current output directory from server
   fetch('/api/output-dir')
@@ -144,41 +179,109 @@ export function initExportPresets(): void {
   });
 }
 
-async function exportAtSize(width: number, height: number, name: string, format: 'png' | 'svg' = 'png'): Promise<void> {
+async function exportAtSize(targetWidth: number, targetHeight: number, name: string, format: 'png' | 'svg' = 'png'): Promise<void> {
   const svg = getCurrentSVG();
   if (!svg) { setStatus('No image to export'); return; }
 
-  const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const filename = `${state.originalFilename || 'image'}_${safeName}_${width}x${height}`;
+  const autoCrop = (document.getElementById('auto-crop') as HTMLInputElement)?.checked ?? true;
+  const bounds = autoCrop ? getTightBounds() : null;
 
-  log.info(`Exporting ${format.toUpperCase()} at ${width}×${height} for ${name}`);
-
-  // For SVG format, update dimensions in the SVG string
   let exportSvg = svg;
-  if (format === 'svg') {
+  let exportWidth = targetWidth;
+  let exportHeight = targetHeight;
+
+  if (bounds) {
+    exportSvg = applyBoundsToSVG(svg, bounds);
+    exportWidth = bounds.width;
+    exportHeight = bounds.height;
+  } else if (format === 'svg') {
     const parser = new DOMParser();
     const doc = parser.parseFromString(svg, 'image/svg+xml');
     const svgEl = doc.querySelector('svg');
     if (svgEl) {
       if (!svgEl.getAttribute('viewBox')) {
-        const origW = svgEl.getAttribute('width') || String(width);
-        const origH = svgEl.getAttribute('height') || String(height);
+        const origW = svgEl.getAttribute('width') || String(targetWidth);
+        const origH = svgEl.getAttribute('height') || String(targetHeight);
         svgEl.setAttribute('viewBox', `0 0 ${origW} ${origH}`);
       }
-      svgEl.setAttribute('width', String(width));
-      svgEl.setAttribute('height', String(height));
-      exportSvg = svgEl.outerHTML;
+      svgEl.setAttribute('width', String(targetWidth));
+      svgEl.setAttribute('height', String(targetHeight));
+      exportSvg = new XMLSerializer().serializeToString(svgEl);
     }
   }
 
+  const safeName = name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `${state.originalFilename || 'image'}_${safeName}_${exportWidth}x${exportHeight}`;
+
+  log.info(`Exporting ${format.toUpperCase()} at ${exportWidth}×${exportHeight} for ${name}`);
+
   showLoading();
-  setStatus(`Saving ${format.toUpperCase()} ${width}×${height}...`);
+  setStatus(`Saving ${format.toUpperCase()} ${exportWidth}×${exportHeight}...`);
+
+  if (format === 'png') {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = exportWidth;
+      canvas.height = exportHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('Canvas not supported');
+
+      const img = new Image();
+      const svgBlob = new Blob([exportSvg], { type: 'image/svg+xml;charset=utf-8' });
+      const url = URL.createObjectURL(svgBlob);
+
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => {
+          ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
+          URL.revokeObjectURL(url);
+          resolve();
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          reject(new Error('Failed to load SVG'));
+        };
+        img.src = url;
+      });
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          setStatus('PNG export failed');
+          hideLoading();
+          return;
+        }
+        const arrayBuffer = await blob.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+        
+        const resp = await fetch('/api/save-base64-png', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            pngData: base64, 
+            filename: filename + '.png',
+            format: 'png',
+            width: exportWidth,
+            height: exportHeight 
+          }),
+        });
+        const data = await resp.json();
+        if (data.error) throw new Error(data.error);
+        log.info(`Saved: ${data.path}`);
+        setStatus(`Saved to ${data.path}`);
+        hideLoading();
+      }, 'image/png');
+    } catch (err: any) {
+      log.error('Save failed:', err.message);
+      setStatus(`Save failed: ${err.message}`);
+      hideLoading();
+    }
+    return;
+  }
 
   try {
     const resp = await fetch('/api/save-to-dir', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ svg: exportSvg, filename, format, width, height }),
+      body: JSON.stringify({ svg: exportSvg, filename, format, width: exportWidth, height: exportHeight }),
     });
 
     const data = await resp.json();
